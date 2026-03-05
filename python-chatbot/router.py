@@ -2,11 +2,7 @@ from semantic_router import Route
 from semantic_router.routers import SemanticRouter
 from semantic_router.encoders import HuggingFaceEncoder
 
-encoder = HuggingFaceEncoder(
-    name="sentence-transformers/all-MiniLM-L6-v2"
-)
-
-# FAQ Route - General questions about the CashSwap service
+# FAQ Route
 faq = Route(
     name='faq',
     utterances=[
@@ -28,7 +24,7 @@ faq = Route(
     score_threshold=0.2
 )
 
-# SQL Route - Questions requiring database queries about users and money exchange
+# SQL Route
 sql = Route(
     name='sql',
     utterances=[
@@ -52,7 +48,7 @@ sql = Route(
     score_threshold=0.2
 )
 
-# Radius Change Route - Follow-up requests to expand search area
+# Radius Change Route
 radius_change = Route(
     name='radius_change',
     utterances=[
@@ -78,7 +74,7 @@ radius_change = Route(
     score_threshold=0.2
 )
 
-# Small Talk Route - Casual conversations
+# Small Talk Route
 small_talk = Route(
     name='small_talk',
     utterances=[
@@ -103,67 +99,18 @@ small_talk = Route(
     score_threshold=0.2
 )
 
+# Lazy-loaded router - only loads the heavy model on first request
+_router_instance = None
 
-router = SemanticRouter(routes=[faq, sql, small_talk, radius_change], encoder=encoder, auto_sync="local")
-
-if __name__ == "__main__":
-    # Test cases for CashSwap
-    print("=" * 80)
-    print("TESTING CASHSWAP SEMANTIC ROUTER")
-    print("=" * 80)
-    
-    # FAQ Tests
-    print("\n📋 FAQ TESTS:")
-    print("-" * 80)
-    test1 = "How does money exchange work on this platform?"
-    print(f"Query: {test1}")
-    print(f"Route: {router(test1).name}")
-    print()
-    
-    test2 = "Is it safe to exchange money with strangers?"
-    print(f"Query: {test2}")
-    print(f"Route: {router(test2).name}")
-    print()
-    
-    # SQL Tests
-    print("\n🔍 SQL DATABASE QUERY TESTS:")
-    print("-" * 80)
-    test3 = "Find people near me who have cash"
-    print(f"Query: {test3}")
-    print(f"Route: {router(test3).name}")
-    print()
-    
-    test4 = "Show me users within 5km with at least 1000 rupees"
-    print(f"Query: {test4}")
-    print(f"Route: {router(test4).name}")
-    print()
-    
-    test5 = "Is there anyone nearby who can do UPI exchange?"
-    print(f"Query: {test5}")
-    print(f"Route: {router(test5).name}")
-    print()
-    
-    test6 = "Who has money available for exchange?"
-    print(f"Query: {test6}")
-    print(f"Route: {router(test6).name}")
-    print()
-    
-    # Small Talk Tests
-    print("\n💬 SMALL TALK TESTS:")
-    print("-" * 80)
-    test7 = "Hey, how are you doing?"
-    print(f"Query: {test7}")
-    print(f"Route: {router(test7).name}")
-    print()
-    
-    test8 = "My name is Rakesh, nice to meet you"
-    print(f"Query: {test8}")
-    print(f"Route: {router(test8).name}")
-    print()
-    
-    test9 = "Thank you for your help!"
-    print(f"Query: {test9}")
-    print(f"Route: {router(test9).name}")
-    print()
-    
-    print("=" * 80)
+def get_router():
+    global _router_instance
+    if _router_instance is None:
+        encoder = HuggingFaceEncoder(
+            name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+        _router_instance = SemanticRouter(
+            routes=[faq, sql, small_talk, radius_change],
+            encoder=encoder,
+            auto_sync="local"
+        )
+    return _router_instance
