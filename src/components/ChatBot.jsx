@@ -8,7 +8,7 @@ import axios from 'axios';
 import ChatWindow from '@/components/ChatWindow';
 
 // Python API URL
-const PYTHON_API_URL = 'http://localhost:5001';
+const PYTHON_API_URL = import.meta.env.VITE_CHATBOT_URL || 'http://localhost:5001';
 
 // Initial welcome message
 const INITIAL_MESSAGE = {
