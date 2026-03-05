@@ -3,7 +3,9 @@ from flask_cors import CORS
 from faq import ingest_faq_data, faq_chain
 import threading
 from pathlib import Path
-from router import router
+from router import get_router
+router = get_router()
+
 from sql import (
     detect_intent,
     build_enhanced_question,
