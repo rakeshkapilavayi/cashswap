@@ -1,19 +1,46 @@
-"""
-Lightweight keyword-based router — replaces semantic-router + HuggingFaceEncoder.
-No local ML model loaded, so memory stays well under Render's 512 MB free tier.
-"""
-
 import re
 
 
-# ── keyword lists ────────────────────────────────────────────────────────────
+_GREETING_RE = re.compile(
+    r"""
+    ^[\s!]*                         # optional leading whitespace/punctuation
+    (
+        h[aei]+[iy]*                # hi, hii, hai, haii, haiiii, hey, heyy
+      | h[e]+llo+                   # hello, helloo
+      | h[ae]y+                     # hey, heyy, hay
+      | sup+                        # sup, supp
+      | yo+                         # yo, yoo
+      | namaste                     # namaste
+      | good\s*(morning|afternoon|evening|night)
+      | greetings?
+      | howdy
+      | what['\s]*s\s*up           # what's up / whats up
+      | how\s+are\s+you
+      | how\s+r\s+u
+    )
+    [\s!?.,]*$                      # optional trailing punctuation
+    """,
+    re.IGNORECASE | re.VERBOSE
+)
+
+_FAREWELL_RE = re.compile(
+    r"^[\s!]*(bye+|goodbye|see\s+you|later|cya|take\s+care|thanks?|thank\s+you|ty|thx)[\s!.?]*$",
+    re.IGNORECASE
+)
+
+_SMALLTALK_PHRASES = [
+    "what is your name", "what's your name", "who are you", "what are you",
+    "are you a bot", "are you a robot", "are you human", "are you ai",
+    "nice to meet", "how are you", "how r u", "how do you do",
+    "you there", "anyone there",
+]
 
 _SQL_KEYWORDS = [
     "exchange", "find people", "find users", "find someone", "near me",
     "nearby", "cash", "upi", "rupees", "rs.", "₹", "amount", "balance",
     "who has", "show me users", "show users", "list users", "people with",
-    "someone who", "anyone with", "convert", "swap", "wallet", "km",
-    "kilometer", "radius", "within", "distance",
+    "someone who", "anyone with", "convert", "swap", "wallet",
+    "kilometer", "radius", "within", "distance", "money",
 ]
 
 _RADIUS_KEYWORDS = [
@@ -28,15 +55,6 @@ _RADIUS_PATTERNS = [
     r"\d+\s*kms?",
     r"\d+\s*kilometers?",
     r"\d+\s*kilometres?",
-    r"in\s+\d+",
-    r"within\s+\d+",
-]
-
-_SMALLTALK_KEYWORDS = [
-    "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
-    "how are you", "what's up", "whats up", "nice to meet", "bye", "goodbye",
-    "see you", "thanks", "thank you", "what is your name", "who are you",
-    "what are you", "are you a bot", "are you a robot",
 ]
 
 _FAQ_KEYWORDS = [
@@ -46,76 +64,96 @@ _FAQ_KEYWORDS = [
     "dark mode", "light mode", "theme", "about", "contact", "support",
     "security", "data", "privacy", "terms", "conditions", "chatbot",
     "what can i do", "how do i", "why is my", "what should i do",
+    "what is this", "what is this website", "what is this app",
+    "what does", "what can",
 ]
 
 
-# ── simple route object (duck-types semantic_router's RouteChoice) ───────────
 
 class _Route:
     def __init__(self, name: str):
         self.name = name
 
 
-# ── routing logic ─────────────────────────────────────────────────────────────
 
 def router(query: str) -> _Route:
-    """
-    Return a _Route whose .name is one of:
-        'sql' | 'radius_change' | 'faq' | 'small_talk'
-    """
-    q = query.lower().strip()
+    q = query.strip()
+    ql = q.lower()
 
-    # 1. radius_change: explicit radius keywords OR a bare number + distance word
-    for kw in _RADIUS_KEYWORDS:
-        if kw in q:
-            return _Route("radius_change")
-    for pat in _RADIUS_PATTERNS:
-        if re.search(pat, q):
-            # Make sure it's not just a money amount like "500 rupees"
-            if not re.search(r"\d+\s*(rupees?|rs\.?|₹)", q):
-                return _Route("radius_change")
+    # 1. Pure greeting (regex — catches haii, haiiii, heyy, etc.)
+    if _GREETING_RE.match(q):
+        return _Route("small_talk")
 
-    # 2. small_talk: greetings / farewells first (short messages)
-    for kw in _SMALLTALK_KEYWORDS:
-        if kw in q:
+    # 2. Pure farewell / thanks
+    if _FAREWELL_RE.match(q):
+        return _Route("small_talk")
+
+    # 3. Small talk phrases
+    for phrase in _SMALLTALK_PHRASES:
+        if phrase in ql:
             return _Route("small_talk")
 
-    # 3. sql: money/exchange/user-search intent
+    # 4. Radius change
+    for kw in _RADIUS_KEYWORDS:
+        if kw in ql:
+            return _Route("radius_change")
+    for pat in _RADIUS_PATTERNS:
+        if re.search(pat, ql):
+            if not re.search(r"\d+\s*(rupees?|rs\.?|₹)", ql):
+                return _Route("radius_change")
+
+    # 5. SQL / money exchange
     for kw in _SQL_KEYWORDS:
-        if kw in q:
+        if kw in ql:
             return _Route("sql")
 
-    # 4. faq: product / how-to questions
+    # 6. FAQ
     for kw in _FAQ_KEYWORDS:
-        if kw in q:
+        if kw in ql:
             return _Route("faq")
 
-    # 5. fallback — treat unknown questions as FAQ so Groq can attempt an answer
+    # 7. Very short messages (≤3 words) that didn't match anything → small_talk
+    if len(ql.split()) <= 3:
+        return _Route("small_talk")
+
+    # 8. Fallback → faq (Groq will handle it)
     return _Route("faq")
 
 
-# Alias so app.py works whether it does:
-#   from router import router   (original)
-#   from router import get_router  (alternate style)
+# Alias for backwards compatibility
 def get_router():
-    """Returns the router callable. Use router() directly instead if possible."""
     return router
 
 
-# ── quick self-test ───────────────────────────────────────────────────────────
+# ── self-test ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     tests = [
-        ("How does CashSwap work?", "faq"),
+        ("Haii", "small_talk"),
+        ("Haiiii", "small_talk"),
+        ("hi", "small_talk"),
+        ("Hey!", "small_talk"),
+        ("heyyyy", "small_talk"),
+        ("Hello", "small_talk"),
+        ("Good morning", "small_talk"),
+        ("How are you", "small_talk"),
+        ("Thanks", "small_talk"),
+        ("bye", "small_talk"),
+        ("What is CashSwap?", "faq"),
+        ("what is this website", "faq"),
+        ("How does it work?", "faq"),
         ("Find people near me who have cash", "sql"),
         ("I want to exchange 500 rupees UPI to cash", "sql"),
+        ("i need to exchange money", "sql"),
         ("Increase the radius to 30 km", "radius_change"),
-        ("Show more users in 25 km", "radius_change"),
-        ("Hi there!", "small_talk"),
-        ("Thanks for your help", "small_talk"),
+        ("show more in 25 km", "radius_change"),
         ("Is it safe to exchange money?", "faq"),
     ]
     print("Router self-test:")
+    all_pass = True
     for query, expected in tests:
         result = router(query).name
         status = "✅" if result == expected else "❌"
-        print(f"  {status}  [{result:13s}]  {query}")
+        if result != expected:
+            all_pass = False
+        print(f"  {status}  [{result:13s}] expected=[{expected:13s}]  {query}")
+    print("\n✅ All tests passed!" if all_pass else "\n❌ Some tests failed.")
