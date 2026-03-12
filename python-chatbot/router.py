@@ -1,101 +1,113 @@
-from groq import Groq
-import os
-from dotenv import load_dotenv
-load_dotenv()
+"""
+Lightweight keyword-based router — replaces semantic-router + HuggingFaceEncoder.
+No local ML model loaded, so memory stays well under Render's 512 MB free tier.
+"""
 
-_client = None
+import re
 
-def get_client():
-    global _client
-    if _client is None:
-        _client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-    return _client
 
-class RouteChoice:
-    def __init__(self, name):
+# ── keyword lists ────────────────────────────────────────────────────────────
+
+_SQL_KEYWORDS = [
+    "exchange", "find people", "find users", "find someone", "near me",
+    "nearby", "cash", "upi", "rupees", "rs.", "₹", "amount", "balance",
+    "who has", "show me users", "show users", "list users", "people with",
+    "someone who", "anyone with", "convert", "swap", "wallet", "km",
+    "kilometer", "radius", "within", "distance",
+]
+
+_RADIUS_KEYWORDS = [
+    "increase radius", "expand radius", "expand search", "wider search",
+    "increase distance", "more users", "more people", "more results",
+    "larger area", "further away", "search in", "look further",
+    "extend search",
+]
+
+_RADIUS_PATTERNS = [
+    r"\d+\s*km",
+    r"\d+\s*kms?",
+    r"\d+\s*kilometers?",
+    r"\d+\s*kilometres?",
+    r"in\s+\d+",
+    r"within\s+\d+",
+]
+
+_SMALLTALK_KEYWORDS = [
+    "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
+    "how are you", "what's up", "whats up", "nice to meet", "bye", "goodbye",
+    "see you", "thanks", "thank you", "what is your name", "who are you",
+    "what are you", "are you a bot", "are you a robot",
+]
+
+_FAQ_KEYWORDS = [
+    "what is cashswap", "how does cashswap", "how does it work", "how it works",
+    "is it safe", "safe to exchange", "fee", "fees", "charge", "cancel",
+    "report", "block", "trust", "verify", "password", "account", "delete",
+    "dark mode", "light mode", "theme", "about", "contact", "support",
+    "security", "data", "privacy", "terms", "conditions", "chatbot",
+    "what can i do", "how do i", "why is my", "what should i do",
+]
+
+
+# ── simple route object (duck-types semantic_router's RouteChoice) ───────────
+
+class _Route:
+    def __init__(self, name: str):
         self.name = name
 
-ROUTING_PROMPT = """You are a router for a money exchange chatbot called CashSwap.
-Classify the user query into exactly one of these 4 categories:
 
-1. faq
-   Questions about CashSwap service, policies, safety, fees, how it works.
-   Examples:
-   - "What is CashSwap?"
-   - "How does CashSwap work?"
-   - "Is the money exchange safe?"
-   - "What is the process to exchange money?"
-   - "How do I verify the other person?"
-   - "What are the terms and conditions?"
-   - "Is there any fee for using CashSwap?"
-   - "How can I trust the person exchanging money?"
-   - "What should I do if there's a problem with exchange?"
-   - "How do I report a fraudulent user?"
-   - "Can I cancel an exchange request?"
-   - "What are the payment security measures?"
+# ── routing logic ─────────────────────────────────────────────────────────────
 
-2. sql
-   Requests to find/search for nearby people to exchange cash or UPI money.
-   Examples:
-   - "i need to exchange 400 cash to upi"
-   - "Find people near me who can exchange money"
-   - "Is there anyone with cash available?"
-   - "Show me users who have UPI"
-   - "Find people with at least 500 rupees cash"
-   - "Who can exchange 1000 rupees nearby?"
-   - "Are there people with cash within 5 km?"
-   - "Show me users with UPI amount above 2000"
-   - "Find someone who can give me cash for UPI"
-   - "Is there anyone near me with money to exchange?"
-   - "Who has the most cash available?"
-   - "List all users with money near my location"
+def router(query: str) -> _Route:
+    """
+    Return a _Route whose .name is one of:
+        'sql' | 'radius_change' | 'faq' | 'small_talk'
+    """
+    q = query.lower().strip()
 
-3. radius_change
-   Requests to expand search area, increase radius, or show more users from a previous search.
-   Examples:
-   - "increase the radius"
-   - "expand the search radius"
-   - "show more users"
-   - "show more people"
-   - "show users in 25 km"
-   - "show more users in 30 km"
-   - "find people within 40 km"
-   - "search within 50 km"
-   - "expand to 20 km"
-   - "wider search"
-   - "increase distance"
-   - "more results please"
-   - "look further away"
-   - "extend search to 30 km"
+    # 1. radius_change: explicit radius keywords OR a bare number + distance word
+    for kw in _RADIUS_KEYWORDS:
+        if kw in q:
+            return _Route("radius_change")
+    for pat in _RADIUS_PATTERNS:
+        if re.search(pat, q):
+            # Make sure it's not just a money amount like "500 rupees"
+            if not re.search(r"\d+\s*(rupees?|rs\.?|₹)", q):
+                return _Route("radius_change")
 
-4. small_talk
-   Greetings, casual conversation, compliments, goodbye.
-   Examples:
-   - "Hi", "Hello", "Hey there", "Good morning"
-   - "How are you?", "What is your name?", "Are you a robot?"
-   - "What are you?", "What do you do?"
-   - "Nice to meet you", "How's it going?", "What's up?"
-   - "Thanks", "Thank you for your help!"
-   - "Bye", "Goodbye", "See you later"
+    # 2. small_talk: greetings / farewells first (short messages)
+    for kw in _SMALLTALK_KEYWORDS:
+        if kw in q:
+            return _Route("small_talk")
 
-Reply with ONLY one word: faq, sql, radius_change, or small_talk
+    # 3. sql: money/exchange/user-search intent
+    for kw in _SQL_KEYWORDS:
+        if kw in q:
+            return _Route("sql")
 
-User query: {query}"""
+    # 4. faq: product / how-to questions
+    for kw in _FAQ_KEYWORDS:
+        if kw in q:
+            return _Route("faq")
+
+    # 5. fallback — treat unknown questions as FAQ so Groq can attempt an answer
+    return _Route("faq")
 
 
-class GroqRouter:
-    def __call__(self, query):
-        response = get_client().chat.completions.create(
-            messages=[{"role": "user", "content": ROUTING_PROMPT.format(query=query)}],
-            model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
-            temperature=0,
-            max_tokens=10
-        )
-        route = response.choices[0].message.content.strip().lower()
-        if route not in ['faq', 'sql', 'radius_change', 'small_talk']:
-            route = 'small_talk'
-        return RouteChoice(route)
-
-
-def get_router():
-    return GroqRouter()
+# ── quick self-test ───────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    tests = [
+        ("How does CashSwap work?", "faq"),
+        ("Find people near me who have cash", "sql"),
+        ("I want to exchange 500 rupees UPI to cash", "sql"),
+        ("Increase the radius to 30 km", "radius_change"),
+        ("Show more users in 25 km", "radius_change"),
+        ("Hi there!", "small_talk"),
+        ("Thanks for your help", "small_talk"),
+        ("Is it safe to exchange money?", "faq"),
+    ]
+    print("Router self-test:")
+    for query, expected in tests:
+        result = router(query).name
+        status = "✅" if result == expected else "❌"
+        print(f"  {status}  [{result:13s}]  {query}")
