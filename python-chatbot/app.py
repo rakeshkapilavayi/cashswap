@@ -53,11 +53,14 @@ def handle_sql_query(query, user_id, user_location):
     """Handle SQL queries with clarification flow"""
     intent_info = detect_intent(query)
 
-    if intent_info['needs_clarification']:
-        if intent_info['user_wants'] == 'not_specified':
-            return {
-                "needs_clarification": True,
-                "message": """I'd be happy to help you find people for money exchange! 
+    if not intent_info['needs_clarification']:
+        return execute_sql_query(query, intent_info, user_id, user_location)
+
+    # Needs clarification — figure out what's missing
+    if intent_info['user_wants'] == 'not_specified':
+        return {
+            "needs_clarification": True,
+            "message": """I'd be happy to help you find people for money exchange! 
 
 **What do you want to receive?** (What are you looking for?)
 - **Cash** - You want to receive physical cash
@@ -65,26 +68,27 @@ def handle_sql_query(query, user_id, user_location):
 - **Either** - You're okay with cash or UPI
 
 Please type: `cash`, `upi`, or `either`""",
-                "clarification_type": "user_wants",
-                "intent_info": intent_info
-            }
+            "clarification_type": "user_wants",
+            "intent_info": intent_info
+        }
 
-        elif intent_info['amount'] == 'not_specified':
-            wants_text = intent_info['user_wants'].upper() if intent_info['user_wants'] != 'both' else 'cash or UPI'
-            return {
-                "needs_clarification": True,
-                "message": f"""Great! I'll help you find people with **{wants_text}** available.
+    elif intent_info['amount'] == 'not_specified':
+        wants_text = intent_info['user_wants'].upper() if intent_info['user_wants'] != 'both' else 'cash or UPI'
+        return {
+            "needs_clarification": True,
+            "message": f"""Great! I'll help you find people with **{wants_text}** available.
 
 **How much money do you want to exchange?**
 
 Please enter the amount in rupees (e.g., `500`, `1000`, `2000`)
 
 Or type `any` if you want to see all available amounts.""",
-                "clarification_type": "amount",
-                "intent_info": intent_info
-            }
-    else:
-        return execute_sql_query(query, intent_info, user_id, user_location)
+            "clarification_type": "amount",
+            "intent_info": intent_info
+        }
+
+    # All info present — run query
+    return execute_sql_query(query, intent_info, user_id, user_location)
 
 
 def execute_sql_query(original_query, intent_info, user_id, user_location):
@@ -325,7 +329,9 @@ def chat():
             })
 
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        import traceback
+        print(f"❌ Error in /chat: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({"error": str(e), "message": "Sorry, I encountered an error. Please try again!"}), 500
 
 
@@ -359,7 +365,9 @@ def clarify():
         return jsonify(result)
 
     except Exception as e:
+        import traceback
         print(f"❌ Clarification Error: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({"error": str(e), "message": "Sorry, something went wrong!"}), 500
 
 
