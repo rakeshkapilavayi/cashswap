@@ -1,11 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from faq import ingest_faq_data, faq_chain
-import threading
 from pathlib import Path
-from router import get_router
-router = get_router()
-
+from router import router
 from sql import (
     detect_intent,
     build_enhanced_question,
@@ -21,7 +18,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 app = Flask(__name__)
 CORS(app)
 
@@ -31,7 +27,7 @@ ingest_faq_data(faqs_path)
 print("🤖 CashSwap AI Chatbot API Started!")
 print("=" * 60)
 
-# ── Server-side memory: remembers last SQL intent per user ──────────────────
+# Server-side memory: remembers last SQL intent per user
 # Enables radius follow-ups without frontend needing to track state
 _last_intent: dict = {}  # { user_id: intent_info }
 
@@ -39,15 +35,11 @@ _last_intent: dict = {}  # { user_id: intent_info }
 def detect_radius_followup(query):
     """Extract a radius in km from a follow-up message. Returns int or None."""
     query_lower = query.lower()
-    match = re.search(
-        r'(\d+)\s*(?:km|kms?|kilometers?|kilometres?)',
-        query_lower
-    )
+    match = re.search(r'(\d+)\s*(?:km|kms?|kilometers?|kilometres?)', query_lower)
     if match:
         radius = int(match.group(1))
         if 1 <= radius <= 500:
             return radius
-    # catch bare numbers when distance keywords are nearby
     if any(kw in query_lower for kw in ['radius', 'distance', 'range', 'area']):
         nums = re.findall(r'\b(\d+)\b', query_lower)
         if nums:
@@ -99,7 +91,6 @@ def execute_sql_query(original_query, intent_info, user_id, user_location):
     """Execute the SQL query with complete information"""
     try:
         enhanced_question = build_enhanced_question(original_query, intent_info, user_id)
-
         sql_query = generate_sql_query(enhanced_question)
         pattern = "<SQL>(.*?)</SQL>"
         matches = re.findall(pattern, sql_query, re.DOTALL)
@@ -150,7 +141,9 @@ def execute_sql_query(original_query, intent_info, user_id, user_location):
         wants_text = "cash" if intent_info['user_wants'] == 'cash' else ("UPI" if intent_info['user_wants'] == 'upi' else "cash or UPI")
         has_text = "cash" if intent_info['user_has'] == 'cash' else ("UPI" if intent_info['user_has'] == 'upi' else "money")
 
-        if intent_info['user_has'] != 'not_specified' and intent_info['user_wants'] != 'not_specified' and intent_info['user_wants'] != 'both':
+        if (intent_info['user_has'] != 'not_specified'
+                and intent_info['user_wants'] != 'not_specified'
+                and intent_info['user_wants'] != 'both'):
             answer = f"**Exchange: Your {has_text.upper()} → Their {wants_text.upper()}**\n\n" + answer
 
         radius_km = user_location.get('radius', 10) if user_location else 10
@@ -169,7 +162,7 @@ def execute_sql_query(original_query, intent_info, user_id, user_location):
     except Exception as e:
         return {
             "needs_clarification": False,
-            "message": f"❌ An error occurred: {str(e)}\n\nPlease try again or contact support.",
+            "message": f"❌ An error occurred: {str(e)}\n\nPlease try again.",
             "users": []
         }
 
@@ -177,7 +170,7 @@ def execute_sql_query(original_query, intent_info, user_id, user_location):
 def handle_clarification_response(response_text, clarification_type, intent_info, user_id, user_location):
     """Process user's clarification response"""
 
-    # ── Radius clarification (from radius_change route) ──────────────────────
+    # Radius clarification (from radius_change route)
     if clarification_type == "radius":
         new_radius = detect_radius_followup(response_text)
         last_intent = _last_intent.get(user_id)
@@ -189,7 +182,6 @@ def handle_clarification_response(response_text, clarification_type, intent_info
             }
 
         if not new_radius:
-            # Try to find a bare number
             nums = re.findall(r'\b(\d+)\b', response_text)
             if nums:
                 new_radius = int(nums[0])
@@ -203,7 +195,7 @@ def handle_clarification_response(response_text, clarification_type, intent_info
         updated_location = {**user_location, 'radius': new_radius}
         return execute_sql_query(response_text, last_intent, user_id, updated_location)
 
-    # ── user_wants clarification ──────────────────────────────────────────────
+    # user_wants clarification
     if clarification_type == "user_wants":
         response_lower = response_text.lower().strip()
 
@@ -242,7 +234,7 @@ Or type `any` if you want to see all available amounts.""",
         else:
             return execute_sql_query(response_text, intent_info, user_id, user_location)
 
-    # ── amount clarification ──────────────────────────────────────────────────
+    # amount clarification
     elif clarification_type == "amount":
         response_lower = response_text.lower().strip()
 
@@ -308,7 +300,6 @@ def chat():
                 })
 
             if not new_radius:
-                # Ask for the radius value
                 return jsonify({
                     "needs_clarification": True,
                     "message": "How far should I search? Please enter a distance like `25 km`, `30 km`, or `50 km`.",
@@ -345,7 +336,7 @@ def clarify():
         data = request.json
         query = data.get('message', '')
         clarification_type = data.get('clarification_type', '')
-        intent_info = data.get('intent_info', None)  # None-safe
+        intent_info = data.get('intent_info', None)
         user_id = data.get('user_id', 1)
         user_location = data.get('user_location', {
             'latitude': 16.5062,
@@ -372,7 +363,6 @@ def clarify():
         return jsonify({"error": str(e), "message": "Sorry, something went wrong!"}), 500
 
 
-# Replace the last app.run() line with:
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=False)
