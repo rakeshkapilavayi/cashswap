@@ -4,25 +4,32 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-groq_client = Groq()
+# Lazy init — do NOT create Groq() at module level.
+# gunicorn --preload runs imports before env vars are set, which crashes the app.
+_groq_client = None
+
+def _get_client():
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    return _groq_client
+
 
 def talk(query):
-    prompt = f'''You are a helpful and friendly chatbot. Besides answering FAQs and suggesting persons, you can engage in light small talk to make the usage of this cashswap experience more pleasant. Keep your responses concise—no more than two lines—and stay relevant to your role as a cashswap assistant.Here what is cashswap for your reference:CashSwap is a peer-to-peer (P2P) exchange platform that connects users who want to swap physical cash for digital UPI money and vice versa.It is similar to olx,, But in place of Things in olx here in cashswap we have cash and UPI money. You can swap cash for UPI money or UPI money for cash with other users on the platform.CashSwap provides a secure and convenient way to exchange cash and UPI money without the need for a bank account or credit card. It is a great option for people who want to avoid high fees associated with traditional money transfer methods.
-
-    QUESTION: {query}
-    '''
-    completion = groq_client.chat.completions.create(
-        model=os.environ['GROQ_MODEL'],
-        messages=[
-            {
-                'role': 'user',
-                'content': prompt
-            }
-        ]
+    prompt = (
+        "You are a helpful and friendly chatbot. Besides answering FAQs and suggesting persons, "
+        "you can engage in light small talk to make the usage of this CashSwap experience more pleasant. "
+        "Keep your responses concise—no more than two lines—and stay relevant to your role as a CashSwap assistant. "
+        "CashSwap is a peer-to-peer (P2P) exchange platform that connects users who want to swap physical cash "
+        "for digital UPI money and vice versa.\n\n"
+        f"QUESTION: {query}"
+    )
+    completion = _get_client().chat.completions.create(
+        model=os.environ.get("GROQ_MODEL", "llama3-8b-8192"),
+        messages=[{"role": "user", "content": prompt}]
     )
     return completion.choices[0].message.content
 
-if __name__ == '__main__':
-    query = "Hai?"
-    answer = talk(query)
-    print("Answer:",answer)
+
+if __name__ == "__main__":
+    print(talk("Hi!"))
