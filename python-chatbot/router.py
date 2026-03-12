@@ -1,10 +1,4 @@
-"""
-Lightweight keyword-based router — replaces semantic-router + HuggingFaceEncoder.
-No local ML model loaded, so memory stays well under Render's 512 MB free tier.
-"""
-
 import re
-
 
 # ── keyword lists ────────────────────────────────────────────────────────────
 
@@ -92,6 +86,14 @@ def router(query: str) -> _Route:
 
     # 5. fallback — treat unknown questions as FAQ so Groq can attempt an answer
     return _Route("faq")
+
+
+# Alias so app.py works whether it does:
+#   from router import router   (original)
+#   from router import get_router  (alternate style)
+def get_router():
+    """Returns the router callable. Use router() directly instead if possible."""
+    return router
 
 
 # ── quick self-test ───────────────────────────────────────────────────────────
