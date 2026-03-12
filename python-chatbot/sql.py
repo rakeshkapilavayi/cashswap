@@ -276,7 +276,10 @@ def filter_by_radius(df, user_lat, user_lon, radius_km=10):
 def run_query(query):
     try:
         db_path = Path(__file__).parent / "cashswap.db"
-        conn = sqlite3.connect(db_path)
+        if not db_path.exists():
+            print(f"❌ Database not found at {db_path}")
+            return None
+        conn = sqlite3.connect(str(db_path))
         df = pd.read_sql_query(query, conn)
         conn.close()
         print(f"🔍 Query returned {len(df)} rows")
